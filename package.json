@@ -1,0 +1,38 @@
+{
+  "name": "mcf-uninstall",
+  "version": "1.0.0",
+  "description": "A NodeJS script to create uninstall functions for Minecraft: Java Edition datapacks",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AmericanBagel/mcf-uninstall.git"
+  },
+  "keywords": [
+    "minecraft",
+    "datapack",
+    "commandline",
+    "cli",
+    "function",
+    "mcfunction"
+  ],
+  "author": "AmericanBagel",
+  "license": "GPL-3.0-or-later",
+  "bugs": {
+    "url": "https://github.com/AmericanBagel/mcf-uninstall/issues"
+  },
+  "homepage": "https://github.com/AmericanBagel/mcf-uninstall#readme",
+  "dependencies": {
+    "@commander-js/extra-typings": "^10.0.1",
+    "chalk": "^5.2.0",
+    "commander": "^10.0.0",
+    "fs": "^0.0.1-security",
+    "path": "^0.12.7"
+  },
+  "devDependencies": {
+    "typescript": "^4.9.4"
+  }
+}
