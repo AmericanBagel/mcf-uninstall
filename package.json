@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "description": "A NodeJS script to create uninstall functions for Minecraft: Java Edition datapacks",
   "type": "module",
-  "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -33,6 +32,7 @@
     "path": "^0.12.7"
   },
   "devDependencies": {
-    "typescript": "^4.9.4"
+    "@types/node": "^18.11.18",
+    "typescript": "^4.9.5"
   }
 }

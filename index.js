@@ -1,142 +1,333 @@
-// @ts-check
-import { readdirSync, existsSync, lstatSync, readFileSync, writeFileSync } from 'fs';
-import { join, basename, dirname, relative, normalize,  } from 'path';
-import { program, Option } from 'commander';
+import fs from 'fs';
+import path from 'path';
 import chalk from 'chalk';
+import process from 'process';
+import { program, Option } from 'commander';
 
-const __filename = decodeURIComponent(new URL('', import.meta.url).pathname);
-const __dirname = decodeURIComponent(new URL('.', import.meta.url).pathname);
+function searchFiles(opts) {
+	const { dir, regex, verbose } = opts;
+	let results = [];
 
-/**
- * Options given as arguments on commandline
- * @typedef {{ adjacent: Boolean, output: import('fs').PathLike, functionTag: Boolean, verbose: boolean }} CommandArgs
- */
+	function search(currentPath) {
+		try {
+			const files = fs.readdirSync(currentPath, { withFileTypes: true });
+			files.forEach((file) => {
+				const filePath = path.join(currentPath, file.name);
+				if (
+					file.isDirectory() ||
+					(file.isSymbolicLink() &&
+						fs.statSync(filePath).isDirectory())
+				) {
+					if (verbose >= 2)
+						console.log(
+							chalk.yellow.bold(
+								`Entering directory: ${chalk.reset.yellow(
+									filePath
+								)}`
+							)
+						);
+					search(filePath);
+				} else if (
+					file.isFile() ||
+					(file.isSymbolicLink() && fs.statSync(filePath).isFile())
+				) {
+					if (verbose >= 4)
+						console.log(
+							chalk.cyan.bold(
+								`Reading line: ${chalk.reset.blue(filePath)}`
+							)
+						);
+					const content = fs.readFileSync(filePath, 'utf-8');
+					content.split('\n').forEach((line) => {
+						if (verbose >= 3)
+							console.log(
+								chalk.cyan.bold(
+									`Searching file: ${chalk.reset.cyan(line)}`
+								)
+							);
+						let match = line.match(regex);
+						if (match) {
+							if (verbose >= 1)
+								console.log(
+									chalk.green.bold(
+										`Match found: ${chalk.reset.green(
+											match[0]
+										)}`
+									)
+								);
+							results.push({
+								id: match[0],
+								file: filePath,
+								dir: path.dirname(filePath),
+							});
+						}
+					});
+				}
+			});
+		} catch (error) {
+			console.error(chalk.red(`Error: ${error.message}`));
+			process.exit();
+		}
+	}
 
-function getDirsInDir(filepath) {
-	return readdirSync(filepath, { withFileTypes: true }).reduce((a, c) => {
-		c.isDirectory() && a.push(c.name);
-		return a;
-	}, []);
+	search(dir);
+	return results;
 }
 
-function test(bool) {
+function searchAll(opts) {
+	const { dir, verbose, scoreboard, team, bossbar } = opts;
 
+	const obj = {};
+	if (opts?.scoreboard) {
+		obj.scoreboard = searchFiles({
+			dir: dir,
+			regex: /(?<=scoreboard objectives add )([a-zA-Z0-9_.]*)/gi,
+			verbose: verbose,
+		});
+	}
+	if (opts?.team) {
+		obj.team = searchFiles({
+			dir: dir,
+			regex: /(?<=team add )([a-zA-Z0-9_.]*)/gi,
+			verbose: verbose,
+		});
+	}
+
+	if (opts?.bossbar) {
+		obj.bossbar = searchFiles({
+			dir: dir,
+			regex: /(?<=bossbar add )([a-zA-Z0-9_.]*)/gi,
+			verbose: verbose,
+		});
+	}
+
+	return obj;
 }
-
-function getFilesInDir(filepath) {
-    return readdirSync(filepath, { withFileTypes: true }).reduce((a, c) => {
-		!c.isDirectory() && a.push(c.name);
-		return a;
-	}, []);
-}
-
-function isDirectory(filepath) {
-    return existsSync(filepath) && lstatSync(filepath).isDirectory();
-}
-
-function isFile(filepath) {
-    return !isDirectory(filepath);
-}
-
-function fileOrDirectory(filepath) {
-    return isDirectory(filepath) ? "directory" : "folder"
-}
-
-/**
- * Scan through file and process, looking for scoreboards, objectives, teams, and bossbars, and either write uninstall function or add to list.
- * @param {String} filepath Path of file to scan and process
- * @param {CommandArgs} options CLI args
- * @returns undefined
- */
-function scanDir(filepath, options) {
-	const directories = getDirsInDir(filepath);
-    const files = getFilesInDir(filepath);
-
-    directories.forEach(directory => {
-        scanDir(join(filepath, directory), output, verbose);
-    })
-
-    files.forEach(file => {
-        scanFile(join(filepath, file), output, verbose);
-    })
-}
-
-/**
- * Scan through file and process, looking for scoreboards, objectives, teams, and bossbars, and either write uninstall function or add to list.
- * @param {String} filepath Path of file to scan and process
- * @param {CommandArgs} options CLI args
- */
-function scanFile(filepath, options) {
-    // Only proceed if file is mcfunction
-    if (basename(filepath).match(/\.mcfunction$/) !== null) {
-        const text = readFileSync(filepath, "utf-8")
-        const arr = text.split("\n");
-
-        const objectives = [];
-        arr.forEach(e => {
-            const match = e.match(/(?<=scoreboard objectives add )[a-zA-Z0-9_.]*(?<= .+)/);
-            if (match !== null) {
-                objectives.push(match[0])
-            }
-        })
-
-        if (objectives.length > 0) {
-            let uninstallMCF = '';
-            objectives.forEach(e => {
-                uninstallMCF += 'scoreboard objectives remove ' + e + '\n'
-            })
-            
-            writeFileSync(join(dirname(filepath), "uninstall.mcfunction"), uninstallMCF)
-            
-            if (verbose) {
-                console.log("Wrote " + relative((dirname(filepath)), "uninstall.mcfunction"))
-            }
-        }
-    }
-}
-
-const error = (input) => program.error(chalk.bold.red(input));
-const scriptName = __filename.replace(/(^(([A-Z]{1}:)*[/\\]*.+[/\\]+)+)|(\..*$)/gi, "");
-
+/*
+console.log(
+	searchAll({
+		dir: '/home/bagel/.local/share/PrismLauncher/instances/Datapack Dev/.minecraft/resourcepacks/minecraft-but/data/',
+		verbose: 0,
+		scoreboard: true,
+		team: true,
+		bossbar: true,
+	})
+);
+*/
 program
-    .name('mcf-uninstall')
-    .description('A CLI tool to automatically create uninstall functions for your datapack by recursively scanning for scoreboard objectives, teams, bossbars, and storage, and adding uninstall functions which remove them.')
-    .usage("[options] <path...>")
-    .summary("create uninstall functions")
-    .addHelpText(
-        'after',
-        '\n\n' +
-            'Examples:\n' +
-            '   npx mcf-uninstall'
-        )
-    .showHelpAfterError('(add --help for additional information)')
-    .addOption(new Option('1.0.0'))
-    .addOption(new Option("-a, --adjacent", "Writes uninstall functions next to the functions that added scoreboard objectives instead of one mcfunction.").conflicts("output"))
-    .addOption(new Option("-o, --output <path>", "File path for complete uninstall function.").conflicts("adjacent").default("./uninstall.mcfunction"))
-    .addOption(new Option("-f, --function-tag", "Create function tag for all created uninstall functions. If one of the provided paths is a datapack directory, an unload function tag will be created for each namespace. If one of the provided paths is a datapack namespace or function folder, an unload function tag will be created.").implies({ adjacent: true }))
-    .addOption(new Option("-v, --verbose", "Enable debug logging"))
-    .argument("<path...>", "filepaths of directories or files with mcfunction files")
-    .action((paths => {
-        var { adjacent, output, functionTag, verbose } = program.opts()
-        
-        /**
-         * @type {String[]}
-         * @var
-         */
-        var args = program.args;
-        
-        args.forEach((arg) => {
-            if (!existsSync(normalize(arg))) {
-                error(`Invalid path "${arg}".\nPlease use a path to an existing file or directory.`);
-            }
-        })
-        /* paths.forEach(filepath => {
-            if (isDirectory(filepath)) {
-                scanDir(filepath, output)
-            } else {
-                scanFile(filepath)
-            }
-        }) */
-}))
+	.name('mcf-uninstall')
+	.description(
+		'A CLI tool to automatically create uninstall functions for your datapack by recursively scanning for scoreboard objectives, teams, bossbars, and storage, and adding uninstall functions which remove them.'
+	)
+	.summary('create uninstall functions')
+	.version('1.0.0')
+	.usage('[options] <path...>')
+	.addHelpText('after', '\n\n' + 'Examples:\n' + '   npx mcf-uninstall')
+	.showHelpAfterError('(add --help for additional information)')
+	.addOption(
+		new Option(
+			'-a, --adjacent',
+			'Writes uninstall functions next to the functions that added scoreboard objectives instead of one mcfunction.'
+		).conflicts('output')
+	)
+	.addOption(
+		new Option(
+			'-o, --output <path>',
+			'File path for complete uninstall function.'
+		).conflicts(path.normalize('./uninstall.mcfunction'))
+	)
+	.addOption(
+		new Option(
+			'-f, --function-tag',
+			'Create function tag for all created uninstall functions. If one of the provided paths is a datapack directory, an unload function tag will be created for each namespace. If one of the provided paths is a datapack namespace or function folder, an unload function tag will be created.'
+		).implies({ adjacent: true })
+	)
+	.addOption(new Option('-v, --verbose', 'Enable debug logging'))
+	.addOption(
+		new Option(
+			'-s, --scoreboard',
+			'Disable adding scoreboards to uninstall'
+		).default(false)
+	)
+	.addOption(
+		new Option('-t, --team', 'Disable adding teams to uninstall').default(
+			false
+		)
+	)
+	.addOption(
+		new Option(
+			'-b, --bossbar',
+			'Disable adding bossbars to uninstall'
+		).default(false)
+	)
+	.argument(
+		'<path...>',
+		'filepaths of directories or files with mcfunction files',
+		undefined,
+		'./'
+	)
+	.action((paths) => {
+		var {
+			adjacent,
+			output,
+			functionTag,
+			verbose,
+			scoreboard,
+			team,
+			bossbar,
+		} = program.opts();
+
+		if (scoreboard && team && bossbar) {
+			console.error(
+				chalk.yellow.bold(
+					'Please enable at least one option: scoreboard (-s, --scoreboard), team (-t, --team), or bossbar (-b, --bossbar)!'
+				)
+			);
+			process.exit();
+		}
+
+		/**
+		 * @type {String[]}
+		 * @var
+		 */
+		var args = program.args;
+
+		function removeDuplicates(array, key) {
+			console.log(array, key);
+			return array.filter(
+				(obj, index, self) =>
+					index === self.findIndex((t) => t[key] === obj[key])
+			);
+		}
+
+		const uninstall = {};
+		args.forEach((arg) => {
+			const obj = searchAll({
+				dir: arg,
+				verbose: verbose,
+				scoreboard: !scoreboard,
+				team: !team,
+				bossbar: !bossbar,
+			});
+			uninstall.scoreboard = [...obj.scoreboard];
+			uninstall.team = [...obj.team];
+			uninstall.bossbar = [...obj.bossbar];
+		});
+
+		function findNamespace(dir) {
+			const parts = dir.split(path.sep);
+			let namespaceIndex = parts.indexOf('data');
+			let namespace, relativePath;
+
+			if (namespaceIndex !== -1) {
+				namespace = parts[namespaceIndex + 1];
+				relativePath = parts.slice(namespaceIndex + 2).join(path.sep);
+			} else {
+				let current = parts.join(path.sep);
+				while (namespaceIndex === -1 && current !== '/') {
+					const contents = fs.readdirSync(current);
+					if (contents.includes('data')) {
+						namespaceIndex = contents.indexOf('data');
+						namespace =
+							parts[
+								parts.length -
+									(contents.length - namespaceIndex)
+							];
+						relativePath = parts
+							.slice(
+								parts.length -
+									(contents.length - namespaceIndex + 1)
+							)
+							.join(path.sep);
+						break;
+					} else {
+						parts.pop();
+						current = parts.join(path.sep);
+					}
+				}
+			}
+
+			return { namespace, relativePath };
+		}
+
+		Object.entries(uninstall).forEach((e) => {
+			removeDuplicates(e, 'id');
+		});
+
+		if (!adjacent) {
+			let text =
+				'# Uninstall function generated by mcf-uninstall script\n# https://github.com/americanbagel/mcf-uninstall\n\n';
+
+			if (scoreboard) {
+				text += '#> Scoreboards\n';
+				uninstall.scoreboard.forEach((e) => {
+					text += `scoreboard objectives remove ${e.id}`;
+				});
+			}
+
+			if (team) {
+				text += '#> Teams\n';
+				uninstall.team.forEach((e) => {
+					text += `team remove ${e.id}`;
+				});
+			}
+
+			if (bossbar) {
+				text += '#> Bossbars\n';
+				uninstall.bossbar.forEach((e) => {
+					text += `bossbar remove ${e.id}`;
+				});
+			}
+
+			fs.writeFileSync();
+		} else if (adjacent && !functionTag) {
+			let text =
+				'# Uninstall function generated by mcf-uninstall script\n# https://github.com/americanbagel/mcf-uninstall\n# Generated with adjacent option, so this function will run functions adjacent to functions which add scoreboards, bossbars, or teams\n\n';
+
+			uninstall.scoreboard.forEach((e) => {
+				/*
+				fs.stat(e.dir, (err, stats) => {
+					if (err) {
+                        if (err.code === "ENOENT") {
+                            console.error(chalk.red.bold(
+                                `ERROR: ${e.dir} was supposed to be an existing directory, but it doesn't exist!`
+                            ));
+                        } else {
+                            console.error(chalk.red.bold(`Error: ${err.message}`));
+                        }
+                        process.exit()
+					} else if (!stats.isDirectory()) {
+						console.warn(chalk.red.bold(
+							`ERROR: ${e.dir} was supposed to be a directory, but it isn't anymore!`
+						));
+					}
+                    
+                    if (stats.isDirectory()) {
+                        
+					}
+				});
+                */
+
+				const uninstallDir = path.join(e.dir, `__uninstall__/`);
+				fs.mkdirSync(uninstallDir);
+
+				let text = '';
+
+				function filterObjForMatch(obj, key, value) {
+					for (const key in obj) {
+						obj[key] = obj[key].filter(
+							(element) => element[key] === value
+						);
+					}
+					return obj;
+				}
+
+				const uninstallHere = filterObjForMatch(obj, 'dir', e.dir);
+				console.log(uninstallHere);
+
+				fs.writeFileSync(path.join(uninstallDir, `${e.id}.mcfunction`));
+			});
+		}
+	});
 
 program.parse();
