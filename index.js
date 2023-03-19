@@ -5,6 +5,36 @@ import process from 'process';
 import { program, Option } from 'commander';
 
 /**
+ * Determine if a file path is a directory or file and call the corresponding callback if provided.
+ *
+ * @param {string} filepath - The file path to be evaluated.
+ * @param {function} [onDirectory] - Callback function to be called if the file path is a directory.
+ * @param {function} [onFile] - Callback function to be called if the file path is a file.
+ *
+ * @returns {"directory" | "file"} - 'directory' if the file path is a directory, 'file' if the file path is a file.
+ */
+function getFileType(filepath, dirCallback, fileCallback) {
+	try {
+		const stat = fs.statSync(filepath);
+
+		if (stat.isDirectory()) {
+			if (typeof dirCallback === 'function') {
+				dirCallback();
+			}
+			return 'directory';
+		} else if (stat.isFile()) {
+			if (typeof fileCallback === 'function') {
+				fileCallback();
+			}
+			return 'file';
+		}
+	} catch (error) {
+		console.error(`Error checking type of "${filepath}": ${error}`);
+		return null;
+	}
+}
+
+/**
  * Search for regex matches in the lines of files in a directory
  *
  * @param {Object} opts
@@ -19,10 +49,11 @@ function searchFiles(opts) {
 
 	/**
 	 * Recursive function to search for regex matches in the lines of files in a directory
-	 * @param {string} currentPath - Path to the current directory being searched
+	 * @param {string} _currentPath - Path to the current directory being searched
 	 */
-	function search(currentPath) {
+	function search(_currentPath) {
 		try {
+			const currentPath = path.dirname(_currentPath);
 			const files = fs.readdirSync(currentPath, { withFileTypes: true });
 			files.forEach((file) => {
 				const filePath = path.join(currentPath, file.name);
@@ -139,13 +170,13 @@ program
 		new Option(
 			'-a, --adjacent',
 			'Writes uninstall functions next to the functions that added scoreboard objectives instead of one mcfunction.'
-		).conflicts('output')
+		).conflicts('output').default(false)
 	)
 	.addOption(
 		new Option(
 			'-o, --output <path>',
-			'File path for complete uninstall function.'
-		).conflicts(path.normalize('./uninstall.mcfunction'))
+			'Directory or file path for complete uninstall function.'
+		).default(path.normalize('./uninstall.mcfunction'))
 	)
 	.addOption(
 		new Option(
@@ -170,6 +201,12 @@ program
 			'-b, --bossbar',
 			'Disable adding bossbars to uninstall'
 		).default(false)
+	)
+	.addOption(
+		new Option(
+			'-i --ignore',
+			'Regular expression of filepaths to ignore. Common examples include ".git" (git hidden folder), "private" (private folders), and "/__" (folders starting with __).'
+		)
 	)
 	.argument(
 		'<path...>',
@@ -224,40 +261,94 @@ program
 			uninstall.bossbar = [...obj.bossbar];
 		});
 
-		function findNamespace(dir) {
-			const parts = dir.split(path.sep);
-			let namespaceIndex = parts.indexOf('data');
-			let namespace, relativePath;
-
-			if (namespaceIndex !== -1) {
-				namespace = parts[namespaceIndex + 1];
-				relativePath = parts.slice(namespaceIndex + 2).join(path.sep);
-			} else {
-				let current = parts.join(path.sep);
-				while (namespaceIndex === -1 && current !== '/') {
-					const contents = fs.readdirSync(current);
-					if (contents.includes('data')) {
-						namespaceIndex = contents.indexOf('data');
-						namespace =
-							parts[
-								parts.length -
-									(contents.length - namespaceIndex)
-							];
-						relativePath = parts
-							.slice(
-								parts.length -
-									(contents.length - namespaceIndex + 1)
-							)
-							.join(path.sep);
-						break;
-					} else {
-						parts.pop();
-						current = parts.join(path.sep);
-					}
-				}
+		function findNamespace(_current, dirname, verbose) {
+			console.log(_current);
+			console.log(arguments);
+			let current = path.dirname(_current);
+			console.log(current);
+			if (verbose < 0 || verbose > 4) {
+				throw new Error(
+					`Verbose value should be between 0 and 4, got ${verbose}.`
+				);
 			}
 
-			return { namespace, relativePath };
+			try {
+				console.log(_current);
+				console.log(current);
+				// Read the contents of the current directory
+				const currentContents = fs.readdirSync(current);
+
+				// Check if the target directory is the current directory
+				if (path.dirname(current) === dirname) {
+					if (verbose >= 2) {
+						console.log(
+							chalk.green(
+								'Found target directory in current directory.'
+							)
+						);
+					}
+					return {
+						name: path.dirname(current),
+						path: path.resolve(dirname, current),
+					};
+				}
+
+				// Check if the target directory is in the contents
+				if (currentContents.includes(dirname)) {
+					if (verbose >= 2) {
+						console.log(
+							chalk.green('Found target directory in contents.')
+						);
+					}
+					return {
+						name: dirname,
+						path: path.resolve(dirname, current),
+					};
+				}
+
+				// Loop through the above directories to search the target directory in parent directories
+				function searchParentDirectories(current) {
+					const directoriesArray = path
+						.normalize(current)
+						.split(path.sep);
+					let parent;
+					let match = null;
+					let increment = 0;
+					while (parent !== dirname) {
+						increment++;
+						parent = directoriesArray[increment];
+						if (parent === dirname) {
+							if (verbose >= 2) {
+								console.log(
+									chalk.green(
+										'Found target directory in parent directories.'
+									)
+								);
+							}
+							match = {
+								name: parent,
+								path: path.resolve(current, parent),
+							};
+						}
+					}
+					return match;
+				}
+				const parentDirectoriesResult =
+					searchParentDirectories(current);
+				if (parentDirectoriesResult) return parentDirectoriesResult;
+			} catch (error) {
+				console.error(
+					chalk.red.bold(
+						`Error reading directory "${current}": ${error}`
+					)
+				);
+				return null;
+			}
+
+			if (verbose >= 1) {
+				console.log(chalk.yellow('Target directory not found.'));
+			}
+			return null;
 		}
 
 		Object.entries(uninstall).forEach((e) => {
@@ -288,6 +379,11 @@ program
 					text += `bossbar remove ${e.id}`;
 				});
 			}
+
+			paths.forEach((path) => {
+				console.log(path);
+				console.log(findNamespace(path, 'data'));
+			});
 
 			// fs.writeFileSync('');
 		} else if (adjacent) {
