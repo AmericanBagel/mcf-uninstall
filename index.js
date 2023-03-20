@@ -50,23 +50,101 @@ function filterArray(arr, _filters) {
 			regexp: [],
 		},
 	};
+
 	_filters.forEach((filter) => {
-		if (filter[0] === "!" && isRegExpString(filter.substring(1))) {
-			filters.negative.regexp.push(new RegExp(filter.substring(1)));
+		if (filter[0] === '!' && isRegExpString(filter.substring(1))) {
+			const regExpArgs = filter.substring(2).split('/');
+			regExpArgs[1].replace('g', '');
+			filters.negative.regexp.push(
+				new RegExp(regExpArgs[0], regExpArgs[1])
+			);
 			return;
 		}
-		if (filter[0] === "!") {
+		if (filter[0] === '!') {
 			filters.negative.string.push(filter.substring(1));
 			return;
 		}
 		if (isRegExpString(filter)) {
-			filters.positive.regexp.push(new RegExp(filter));
+			const regExpArgs = filter.substring(1).split('/');
+			regExpArgs[1].replace('g', '');
+			filters.positive.regexp.push(
+				new RegExp(regExpArgs[0], regExpArgs[1])
+			);
 			return;
 		}
 		filters.positive.string.push(filter);
 	});
 
-	// ... filter the arrays here using the filters obj
+	let filtered = arr.filter((obj) => {
+		let isMatched = false;
+		if (filters.positive.string.length || filters.positive.regexp.length) {
+			// Check positive string filters
+			if (filters.positive.string.length) {
+				for (let i = 0; i < filters.positive.string.length; i++) {
+					if (obj.id.includes(filters.positive.string[i])) {
+						isMatched = true;
+						break;
+					}
+				}
+			}
+
+			if (filters.positive.regexp.length) {
+				// Check positive regexp filters
+				if (!isMatched) {
+					for (let i = 0; i < filters.positive.regexp.length; i++) {
+						if (
+							new RegExp(filters.positive.regexp[i]).test(obj.id)
+						) {
+							isMatched = true;
+							break;
+						}
+					}
+				}
+			}
+
+			// Check negative string filters
+			if (isMatched) {
+				for (let i = 0; i < filters.negative.string.length; i++) {
+					if (obj.id.includes(filters.negative.string[i])) {
+						isMatched = false;
+						break;
+					}
+				}
+			}
+
+			// Check negative regexp filters
+			if (isMatched) {
+				for (let i = 0; i < filters.negative.regexp.length; i++) {
+					if (filters.negative.regexp[i].test(obj.id)) {
+						isMatched = false;
+						break;
+					}
+				}
+			}
+		} else if (
+			filters.negative.string.length ||
+			filters.negative.regexp.length
+		) {
+			isMatched = true;
+			for (let i = 0; i < filters.negative.string.length; i++) {
+				if (obj.id.includes(filters.negative.string[i])) {
+					isMatched = false;
+					break;
+				}
+			}
+
+			for (let i = 0; i < filters.negative.regexp.length; i++) {
+				if (filters.negative.regexp[i].test(obj.id)) {
+					isMatched = false;
+					break;
+				}
+			}
+		} else {
+			return true;
+		}
+
+		return isMatched;
+	});
 
 	return filtered;
 }
@@ -83,8 +161,6 @@ function filterArray(arr, _filters) {
  */
 function searchFiles(opts) {
 	const { dir, regex, verbose, type, value } = opts;
-
-	console.log('searchFiles opts: ', opts);
 
 	let results = [];
 	function search(_currentPath, regex) {
@@ -156,14 +232,13 @@ function searchFiles(opts) {
 		}
 	}
 
-	console.log('value: ', value);
 	if (value !== true) {
 		search(dir, regex);
-		console.log(results);
 		if (value === false) {
 			return results;
 		} else {
-			return filterArray(results, value);
+			const filtered = filterArray(results, value);
+			return filtered;
 		}
 	} else {
 		return [];
@@ -173,10 +248,6 @@ function searchFiles(opts) {
 function searchAll(opts) {
 	const { dir, verbose, scoreboard, team, bossbar, storage, tag, killTag } =
 		opts;
-
-	console.log(
-		`dir: ${dir} | verbose: ${verbose} | scoreboard: ${scoreboard} | team: ${team} | bossbar: ${bossbar} | tag: ${tag} | killTag: ${killTag} |`
-	);
 
 	const obj = {};
 	if (scoreboard) {
@@ -266,12 +337,12 @@ program
 	.addOption(new Option('-v, --verbose [number]', 'Enable debug logging'))
 	.addOption(
 		new Option(
-			'-s, --scoreboard',
+			'-s, --scoreboard [options...]',
 			'Disable adding scoreboards to uninstall'
 		).default(false)
 	)
 	.addOption(
-		new Option('-t, --team', 'Disable adding teams to uninstall').default(
+		new Option('-t, --team [options...]', 'Disable adding teams to uninstall').default(
 			false
 		)
 	)
@@ -283,7 +354,7 @@ program
 	)
 	.addOption(
 		new Option(
-			'-n, --storage',
+			'-n, --storage [options...]',
 			'Disable adding storage to uninstall'
 		).default(false)
 	)
