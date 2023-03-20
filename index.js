@@ -34,6 +34,100 @@ function getFileType(filepath, dirCallback, fileCallback) {
 	}
 }
 
+function isRegExpString(str) {
+	const regex = new RegExp('^/.+/[gmisxuUAJD]+$');
+	return regex.test(str);
+}
+
+/**
+ * Filters an array of objects based on the values in a given array.
+ * Each object must have an `id` property which is a string.
+ * If an object's `id` contains any of the strings in `value` or matches any of the RegExp patterns in `value`,
+ * it will be included in the filtered array. If a string or RegExp string in `value` starts with `!`,
+ * any `id` containing that string (with the "!" substringed out) or matching the RegExp string (with the "!" substringed out)
+ * will be excluded from the filtered list.
+ * @param {Object[]} array - The array of objects to filter.
+ * @param {(string|RegExp)[]} value - The values to filter by.
+ * @returns {Object[]} The filtered array of objects.
+ */
+function filterArray(array, _filters) {
+	let stringFilters = _filters.filter((filter) => {
+		if (typeof filter === 'string' && !isRegExpString(filter)) {
+			if (filter[0] !== '!') {
+				return true;
+			}
+		}
+		return false;
+	});
+	console.log('stringFilters: ', stringFilters);
+
+	let regexFilters = [];
+	_filters.forEach((filter) => {
+		if (typeof filter === 'string') {
+			if (isRegExpString(filter)) {
+				regexFilters.push(new RegExp(filter));
+			}
+		} else if (filter instanceof RegExp) {
+			regexFilters.push(filter);
+		}
+	});
+	console.log('regexFilters: ', regexFilters);
+
+	let negativeStringFilters = [];
+	_filters.forEach((filter) => {
+		if (
+			typeof filter === 'string' &&
+			filter[0] === '!' &&
+			!isRegExpString(filter)
+		) {
+			negativeStringFilters.push(filter.slice(1));
+		}
+	});
+	console.log('negativeStringFilters: ', negativeStringFilters);
+
+	let negativeRegexFilters = [];
+	_filters.forEach((filter) => {
+		if (
+			typeof filter === 'string' &&
+			filter[0] === '!' &&
+			isRegExpString(filter.substring(1))
+		) {
+			negativeRegexFilters.push(new RegExp(filter.substring(1)));
+		}
+	});
+	console.log('negativeRegexFilters: ', negativeRegexFilters);
+
+	let filtered = array.filter((obj) => {
+		let containsStringFilter = stringFilters.some((filter) => {
+			return obj.id.includes(filter);
+		});
+
+		let matchesRegexFilter = regexFilters.some((filter) => {
+			return filter.test(obj.id);
+		});
+
+		return containsStringFilter || matchesRegexFilter;
+	});
+	console.log('filtered: ', filtered);
+
+	filtered = filtered.filter((obj) => {
+		let containsNegativeStringFilter = negativeStringFilters.some(
+			(filter) => {
+				return obj.id.includes(filter);
+			}
+		);
+
+		let matchesNegativeRegexFilter = negativeRegexFilters.some((filter) => {
+			return filter.test(obj.id);
+		});
+
+		return !containsNegativeStringFilter && !matchesNegativeRegexFilter;
+	});
+	console.log('filtered: ', filtered);
+
+	return filtered;
+}
+
 /**
  * Search for regex matches in the lines of files in a directory
  *
@@ -41,20 +135,21 @@ function getFileType(filepath, dirCallback, fileCallback) {
  * @param {string} opts.dir - Path to the directory to search
  * @param {RegExp} opts.regex - Regex pattern to search for
  * @param {number} opts.verbose - Level of verbosity for logs
+ * @param {(string|RegExp|Array<string>|Array<RegExp>|Boolean)} value - The value to filter by, or whether to return results at all.
  * @returns {Array} results - Array of objects containing information about matches found
  */
 function searchFiles(opts) {
-	const { dir, regex, verbose, type } = opts;
-	let results = [];
+	const { dir, regex, verbose, type, value } = opts;
 
-	/**
-	 * Recursive function to search for regex matches in the lines of files in a directory
-	 * @param {string} _currentPath - Path to the current directory being searched
-	 */
-	function search(_currentPath) {
+	console.log('searchFiles opts: ', opts);
+
+	let results = [];
+	function search(_currentPath, regex) {
 		try {
-			const currentPath = path.dirname(_currentPath);
-			const files = fs.readdirSync(currentPath, { withFileTypes: true });
+			const currentPath = _currentPath;
+			const files = fs.readdirSync(currentPath, {
+				withFileTypes: true,
+			});
 			files.forEach((file) => {
 				const filePath = path.join(currentPath, file.name);
 				if (
@@ -71,7 +166,7 @@ function searchFiles(opts) {
 							)
 						);
 					}
-					search(filePath);
+					search(filePath, regex);
 				} else if (
 					file.isFile() ||
 					(file.isSymbolicLink() && fs.statSync(filePath).isFile())
@@ -118,41 +213,80 @@ function searchFiles(opts) {
 		}
 	}
 
-	search(dir);
-	return results;
+	console.log('value: ', value);
+	if (value !== true) {
+		search(dir, regex);
+		console.log(results);
+		if (value === false) {
+			return results;
+		} else {
+			return filterArray(results, value);
+		}
+	} else {
+		return [];
+	}
 }
 
 function searchAll(opts) {
-	const { dir, verbose, scoreboard, team, bossbar } = opts;
+	const { dir, verbose, scoreboard, team, bossbar, storage, tag, killTag } =
+		opts;
+
+	console.log(
+		`dir: ${dir} | verbose: ${verbose} | scoreboard: ${scoreboard} | team: ${team} | bossbar: ${bossbar} | tag: ${tag} | killTag: ${killTag} |`
+	);
 
 	const obj = {};
-	if (opts?.scoreboard) {
+	if (scoreboard) {
 		obj.scoreboard = searchFiles({
-			dir: dir,
-			regex: /(?<=scoreboard objectives add )([a-zA-Z0-9_.]*)/gi,
-			verbose: verbose,
+			dir,
+			regex: /(?<=scoreboard objectives add )([a-zA-Z0-9\-_.]*)/gi,
+			verbose,
 			type: 'Scoreboard',
+			value: scoreboard,
 		});
 	}
-	if (opts?.team) {
+	if (team !== true) {
 		obj.team = searchFiles({
-			dir: dir,
-			regex: /(?<=team add )([a-zA-Z0-9_.]*)/gi,
-			verbose: verbose,
+			dir,
+			regex: /(?<=team add )([a-zA-Z0-9\-_.]*)/gi,
+			verbose,
 			type: 'Team',
+			value: team,
 		});
 	}
 
-	if (opts?.bossbar) {
+	if (bossbar !== true) {
 		obj.bossbar = searchFiles({
-			dir: dir,
-			regex: /(?<=bossbar add )([a-zA-Z0-9_.]*)/gi,
-			verbose: verbose,
+			dir,
+			regex: /(?<=bossbar add )([a-zA-Z0-9\-_.]*)/gi,
+			verbose,
 			type: 'Bossbar',
+			value: bossbar,
 		});
 	}
 
-	console.log();
+	if (storage !== true) {
+		obj.storage = searchFiles({
+			dir,
+			regex: /((?<=data merge storage )|(?<=data modify storage ))([a-zA-Z0-9_.:-]*)/gi,
+			verbose,
+			type: 'Storage',
+			value: storage,
+		});
+	}
+
+	if (tag !== true) {
+		obj.tag = searchFiles({
+			dir,
+			regex: /(?<=tag @[psaer]*.add )([a-zA-Z0-9\-_.]*)/gi,
+			verbose,
+			type: 'Tag',
+			value: tag,
+		});
+	}
+
+	console.log(obj);
+
 	return obj;
 }
 
@@ -170,7 +304,9 @@ program
 		new Option(
 			'-a, --adjacent',
 			'Writes uninstall functions next to the functions that added scoreboard objectives instead of one mcfunction.'
-		).conflicts('output').default(false)
+		)
+			.conflicts('output')
+			.default(false)
 	)
 	.addOption(
 		new Option(
@@ -204,6 +340,26 @@ program
 	)
 	.addOption(
 		new Option(
+			'-n, --storage',
+			'Disable adding storage to uninstall'
+		).default(false)
+	)
+	.addOption(
+		new Option(
+			'-tg --tag [options...]',
+			`Disable adding tags to uninstall by specifying just the flag or "false" or specify array tag prefix strings or regex to filter only for specific tags. Useful if your datapack touches tags that other datapacks use. If a string starts with "!", any tags starting with "!" will be excluded instead of included. Includes a regex pattern to exclude tags starting with "global" by default. To exclude a prefix, use the regex ${chalk.inverse(
+				`/^(?!${chalk.bold('yourphrasehere')}).*/`
+			)}.`
+		).default(false)
+	)
+	.addOption(
+		new Option(
+			'-k, --kill-tag',
+			'Enable killing entities with tags instead of just removing the tags. Excludes players in the generated selectors automatically.'
+		).default(false)
+	)
+	.addOption(
+		new Option(
 			'-i --ignore',
 			'Regular expression of filepaths to ignore. Common examples include ".git" (git hidden folder), "private" (private folders), and "/__" (folders starting with __).'
 		)
@@ -223,21 +379,26 @@ program
 			scoreboard,
 			team,
 			bossbar,
+			storage,
+			tag,
+			killTag,
 		} = program.opts();
 
-		if (scoreboard && team && bossbar) {
+		if (
+			scoreboard === true &&
+			team === true &&
+			bossbar === true &&
+			storage === true &&
+			tag === true
+		) {
 			console.error(
 				chalk.yellow.bold(
-					'Please enable at least one option: scoreboard (-s, --scoreboard), team (-t, --team), or bossbar (-b, --bossbar)!'
+					'Please enable at least one option: scoreboard (-s, --scoreboard), team (-t, --team), bossbar (-b, --bossbar), storage (-s, --storage), or tag (-s, --storage)!'
 				)
 			);
 			process.exit();
 		}
 
-		/**
-		 * @type {String[]}
-		 * @var
-		 */
 		var args = program.args;
 
 		function removeDuplicates(array, key) {
@@ -246,9 +407,19 @@ program
 					index === self.findIndex((t) => t[key] === obj[key])
 			);
 		}
-
+		console.log('opts: ', program.opts());
+		console.log('args: ', program.args);
 		const uninstall = {};
-		args.forEach((arg) => {
+		const obj = searchAll({
+			dir: args[0],
+			verbose,
+			scoreboard: scoreboard,
+			team: team,
+			bossbar: bossbar,
+			storage: storage,
+			tag: tag,
+		});
+		/* args.forEach((arg) => {
 			const obj = searchAll({
 				dir: arg,
 				verbose: verbose,
@@ -260,7 +431,7 @@ program
 			uninstall.team = [...obj.team];
 			uninstall.bossbar = [...obj.bossbar];
 		});
-
+ */
 		function findNamespace(_current, dirname, verbose) {
 			console.log(_current);
 			console.log(arguments);
@@ -351,89 +522,89 @@ program
 			return null;
 		}
 
-		Object.entries(uninstall).forEach((e) => {
-			removeDuplicates(e, 'id');
-		});
+		// Object.entries(uninstall).forEach((e) => {
+		// 	removeDuplicates(e, 'id');
+		// });
 
-		if (!adjacent) {
-			let text =
-				'# Uninstall function generated by mcf-uninstall script\n# https://github.com/americanbagel/mcf-uninstall\n\n';
+		// if (!adjacent) {
+		// 	let text =
+		// 		'# Uninstall function generated by mcf-uninstall script\n# https://github.com/americanbagel/mcf-uninstall\n\n';
 
-			if (scoreboard) {
-				text += '#> Scoreboards\n';
-				uninstall.scoreboard.forEach((e) => {
-					text += `scoreboard objectives remove ${e.id}`;
-				});
-			}
+		// 	if (scoreboard) {
+		// 		text += '#> Scoreboards\n';
+		// 		uninstall.scoreboard.forEach((e) => {
+		// 			text += `scoreboard objectives remove ${e.id}`;
+		// 		});
+		// 	}
 
-			if (team) {
-				text += '#> Teams\n';
-				uninstall.team.forEach((e) => {
-					text += `team remove ${e.id}`;
-				});
-			}
+		// 	if (team) {
+		// 		text += '#> Teams\n';
+		// 		uninstall.team.forEach((e) => {
+		// 			text += `team remove ${e.id}`;
+		// 		});
+		// 	}
 
-			if (bossbar) {
-				text += '#> Bossbars\n';
-				uninstall.bossbar.forEach((e) => {
-					text += `bossbar remove ${e.id}`;
-				});
-			}
+		// 	if (bossbar) {
+		// 		text += '#> Bossbars\n';
+		// 		uninstall.bossbar.forEach((e) => {
+		// 			text += `bossbar remove ${e.id}`;
+		// 		});
+		// 	}
 
-			paths.forEach((path) => {
-				console.log(path);
-				console.log(findNamespace(path, 'data'));
-			});
+		// 	paths.forEach((path) => {
+		// 		console.log(path);
+		// 		console.log(findNamespace(path, 'data'));
+		// 	});
 
-			// fs.writeFileSync('');
-		} else if (adjacent) {
-			let text =
-				'# Uninstall function generated by mcf-uninstall script\n# https://github.com/americanbagel/mcf-uninstall\n# Generated with adjacent option, so this function will run functions adjacent to functions which add scoreboards, bossbars, or teams\n\n';
+		// 	// fs.writeFileSync('');
+		// } else if (adjacent) {
+		// 	let text =
+		// 		'# Uninstall function generated by mcf-uninstall script\n# https://github.com/americanbagel/mcf-uninstall\n# Generated with adjacent option, so this function will run functions adjacent to functions which add scoreboards, bossbars, or teams\n\n';
 
-			uninstall.scoreboard.forEach((e) => {
-				/*
-				fs.stat(e.dir, (err, stats) => {
-					if (err) {
-                        if (err.code === "ENOENT") {
-                            console.error(chalk.red.bold(
-                                `ERROR: ${e.dir} was supposed to be an existing directory, but it doesn't exist!`
-                            ));
-                        } else {
-                            console.error(chalk.red.bold(`Error: ${err.message}`));
-                        }
-                        process.exit()
-					} else if (!stats.isDirectory()) {
-						console.warn(chalk.red.bold(
-							`ERROR: ${e.dir} was supposed to be a directory, but it isn't anymore!`
-						));
-					}
-                    
-                    if (stats.isDirectory()) {
-                        
-					}
-				});
-                */
+		// 	uninstall.scoreboard.forEach((e) => {
+		// 		/*
+		// 		fs.stat(e.dir, (err, stats) => {
+		// 			if (err) {
+		//                 if (err.code === "ENOENT") {
+		//                     console.error(chalk.red.bold(
+		//                         `ERROR: ${e.dir} was supposed to be an existing directory, but it doesn't exist!`
+		//                     ));
+		//                 } else {
+		//                     console.error(chalk.red.bold(`Error: ${err.message}`));
+		//                 }
+		//                 process.exit()
+		// 			} else if (!stats.isDirectory()) {
+		// 				console.warn(chalk.red.bold(
+		// 					`ERROR: ${e.dir} was supposed to be a directory, but it isn't anymore!`
+		// 				));
+		// 			}
 
-				const uninstallDir = path.join(e.dir, `__uninstall__/`);
-				fs.mkdirSync(uninstallDir);
+		//             if (stats.isDirectory()) {
 
-				let text = '';
+		// 			}
+		// 		});
+		//         */
 
-				function filterObjForMatch(obj, key, value) {
-					for (const key in obj) {
-						obj[key] = obj[key].filter(
-							(element) => element[key] === value
-						);
-					}
-					return obj;
-				}
+		// 		const uninstallDir = path.join(e.dir, `__uninstall__/`);
+		// 		fs.mkdirSync(uninstallDir);
 
-				const uninstallHere = filterObjForMatch(obj, 'dir', e.dir);
-				console.log(uninstallHere);
+		// 		let text = '';
 
-				fs.writeFileSync(path.join(uninstallDir, `${e.id}.mcfunction`));
-			});
-		}
+		// 		function filterObjForMatch(obj, key, value) {
+		// 			for (const key in obj) {
+		// 				obj[key] = obj[key].filter(
+		// 					(element) => element[key] === value
+		// 				);
+		// 			}
+		// 			return obj;
+		// 		}
+
+		// 		const uninstallHere = filterObjForMatch(obj, 'dir', e.dir);
+		// 		console.log(uninstallHere);
+
+		// 		fs.writeFileSync(path.join(uninstallDir, `${e.id}.mcfunction`));
+		// 	});
+		// }
 	});
 
 program.parse();
