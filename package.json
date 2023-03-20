@@ -1,6 +1,6 @@
 {
   "name": "mcf-uninstall",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "A NodeJS script to create uninstall functions for Minecraft: Java Edition datapacks",
   "type": "module",
   "bin": {
