@@ -35,95 +35,38 @@ function getFileType(filepath, dirCallback, fileCallback) {
 }
 
 function isRegExpString(str) {
-	const regex = new RegExp('^/.+/[gmisxuUAJD]+$');
+	const regex = new RegExp('^/.+/[gmisxuUAJD]*$');
 	return regex.test(str);
 }
 
-/**
- * Filters an array of objects based on the values in a given array.
- * Each object must have an `id` property which is a string.
- * If an object's `id` contains any of the strings in `value` or matches any of the RegExp patterns in `value`,
- * it will be included in the filtered array. If a string or RegExp string in `value` starts with `!`,
- * any `id` containing that string (with the "!" substringed out) or matching the RegExp string (with the "!" substringed out)
- * will be excluded from the filtered list.
- * @param {Object[]} array - The array of objects to filter.
- * @param {(string|RegExp)[]} value - The values to filter by.
- * @returns {Object[]} The filtered array of objects.
- */
-function filterArray(array, _filters) {
-	let stringFilters = _filters.filter((filter) => {
-		if (typeof filter === 'string' && !isRegExpString(filter)) {
-			if (filter[0] !== '!') {
-				return true;
-			}
-		}
-		return false;
-	});
-	console.log('stringFilters: ', stringFilters);
-
-	let regexFilters = [];
+function filterArray(arr, _filters) {
+	const filters = {
+		positive: {
+			string: [],
+			regexp: [],
+		},
+		negative: {
+			string: [],
+			regexp: [],
+		},
+	};
 	_filters.forEach((filter) => {
-		if (typeof filter === 'string') {
-			if (isRegExpString(filter)) {
-				regexFilters.push(new RegExp(filter));
-			}
-		} else if (filter instanceof RegExp) {
-			regexFilters.push(filter);
+		if (filter[0] === "!" && isRegExpString(filter.substring(1))) {
+			filters.negative.regexp.push(new RegExp(filter.substring(1)));
+			return;
 		}
-	});
-	console.log('regexFilters: ', regexFilters);
-
-	let negativeStringFilters = [];
-	_filters.forEach((filter) => {
-		if (
-			typeof filter === 'string' &&
-			filter[0] === '!' &&
-			!isRegExpString(filter)
-		) {
-			negativeStringFilters.push(filter.slice(1));
+		if (filter[0] === "!") {
+			filters.negative.string.push(filter.substring(1));
+			return;
 		}
-	});
-	console.log('negativeStringFilters: ', negativeStringFilters);
-
-	let negativeRegexFilters = [];
-	_filters.forEach((filter) => {
-		if (
-			typeof filter === 'string' &&
-			filter[0] === '!' &&
-			isRegExpString(filter.substring(1))
-		) {
-			negativeRegexFilters.push(new RegExp(filter.substring(1)));
+		if (isRegExpString(filter)) {
+			filters.positive.regexp.push(new RegExp(filter));
+			return;
 		}
+		filters.positive.string.push(filter);
 	});
-	console.log('negativeRegexFilters: ', negativeRegexFilters);
 
-	let filtered = array.filter((obj) => {
-		let containsStringFilter = stringFilters.some((filter) => {
-			return obj.id.includes(filter);
-		});
-
-		let matchesRegexFilter = regexFilters.some((filter) => {
-			return filter.test(obj.id);
-		});
-
-		return containsStringFilter || matchesRegexFilter;
-	});
-	console.log('filtered: ', filtered);
-
-	filtered = filtered.filter((obj) => {
-		let containsNegativeStringFilter = negativeStringFilters.some(
-			(filter) => {
-				return obj.id.includes(filter);
-			}
-		);
-
-		let matchesNegativeRegexFilter = negativeRegexFilters.some((filter) => {
-			return filter.test(obj.id);
-		});
-
-		return !containsNegativeStringFilter && !matchesNegativeRegexFilter;
-	});
-	console.log('filtered: ', filtered);
+	// ... filter the arrays here using the filters obj
 
 	return filtered;
 }
